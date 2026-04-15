@@ -88,7 +88,7 @@ decision = await router.route(ShiftRequest(prompt="...", force_tier="performance
 ## Development
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/lc-shift.git
+git clone https://github.com/Saimoguloju/lc-shift.git
 cd lc-shift
 uv sync --dev
 uv run pytest -v
