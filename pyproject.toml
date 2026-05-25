@@ -1,15 +1,27 @@
 [project]
 name = "lc-shift"
 version = "0.1.0"
-description = "LLM request router - picks the right model tier based on prompt complexity, budget, or latency."
+description = "Provider-agnostic LLM router — picks the right model tier per prompt based on complexity, budget, or latency. Sub-1ms, no API calls, 35 built-in providers."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-authors = [{ name = "Moguloju Sai" }]
+authors = [{ name = "Moguloju Sai", email = "sai.moguloju@elisiontec.com" }]
+keywords = [
+    "llm", "router", "routing", "ai", "openai", "anthropic", "gemini",
+    "llm-router", "llm-gateway", "model-routing", "cost-optimization",
+    "fallback", "multi-provider", "orchestration",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
 
