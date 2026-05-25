@@ -30,7 +30,7 @@ class TestRouting:
             ShiftRequest(prompt="test", force_tier="performance")
         )
         assert decision.tier_name == "performance"
-        assert decision.reason == "forced by request"
+        assert decision.reason == "force_tier override"
 
     @pytest.mark.asyncio
     async def test_force_invalid_tier_raises(
