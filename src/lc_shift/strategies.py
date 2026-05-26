@@ -26,7 +26,7 @@ def estimate_token_count(text: str) -> int:
 
 
 def compute_complexity(prompt: str) -> float:
-    """Score from 0-1 based on length, code, keywords, and structure."""
+    """Heuristic scoring of prompt complexity (0.0 to 1.0)."""
     score = 0.0
     tokens = estimate_token_count(prompt)
     lower = prompt.lower()
@@ -58,7 +58,7 @@ class BaseStrategy(abc.ABC):
         config: RouterConfig,
         spent_usd: float,
     ) -> tuple[str, str]:
-        """Return (tier_name, reason)."""
+        """Returns tuple of (tier_name, reason)."""
         ...
 
 
@@ -121,7 +121,7 @@ class CascadeStrategy(BaseStrategy):
         spent_usd: float,
     ) -> tuple[str, str]:
         cheapest = min(config.tiers.items(), key=lambda t: t[1].cost_per_1k_input)
-        return cheapest[0], "cascade: start with cheapest tier, escalate on insufficient quality"
+        return cheapest[0], "cascade: start with cheapest tier"
 
 
 class LatencyStrategy(BaseStrategy):
@@ -147,8 +147,7 @@ class LatencyStrategy(BaseStrategy):
 
         fastest = min(config.tiers.items(), key=lambda t: t[1].avg_latency_ms)
         return fastest[0], (
-            f"no tier meets {target}ms target; using fastest "
-            f"({fastest[1].avg_latency_ms}ms)"
+            f"no tier meets {target}ms target; using fastest ({fastest[1].avg_latency_ms}ms)"
         )
 
 

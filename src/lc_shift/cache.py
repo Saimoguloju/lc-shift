@@ -1,10 +1,8 @@
-"""In-memory routing decision cache with TTL and LRU eviction."""
-
 from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from lc_shift.models import RoutingDecision
 
@@ -17,20 +15,10 @@ class _Entry:
 
 
 class RoutingCache:
-    """Cache routing decisions for identical prompts to avoid re-scoring.
-
-    Keyed by SHA-256(strategy + prompt), scoped so strategy changes
-    don't return stale decisions.
-
-    Example::
-
-        cache = RoutingCache(ttl_seconds=120, max_size=2000)
-        router = RouterShifter(config, cache=cache)
-
-        # Second identical request is served from cache — zero overhead.
-        d1 = await router.route(ShiftRequest(prompt="hello"))
-        d2 = await router.route(ShiftRequest(prompt="hello"))
-        assert d2.overhead_ms < 0.01
+    """In-memory cache for routing decisions.
+    
+    Keys are generated using a combination of the prompt and routing strategy
+    to ensure changes in configuration correctly bust the cache.
     """
 
     __slots__ = ("_ttl", "_max_size", "_store")
@@ -40,15 +28,13 @@ class RoutingCache:
         self._max_size = max_size
         self._store: dict[str, _Entry] = {}
 
-    # --- public API ---------------------------------------------------------
-
     def get(self, prompt: str, strategy: str) -> RoutingDecision | None:
         key = self._key(prompt, strategy)
         entry = self._store.get(key)
-        if entry is None:
+        if not entry:
             return None
         if time.monotonic() > entry.expires_at:
-            del self._store[key]
+            self._store.pop(key, None)
             return None
         entry.hits += 1
         return entry.decision
@@ -73,19 +59,17 @@ class RoutingCache:
     def total_hits(self) -> int:
         return sum(e.hits for e in self._store.values())
 
-    # --- internals ----------------------------------------------------------
-
     @staticmethod
     def _key(prompt: str, strategy: str) -> str:
-        return hashlib.sha256(f"{strategy}:{prompt}".encode()).hexdigest()[:24]
+        data = f"{strategy}:{prompt}".encode()
+        return hashlib.sha256(data).hexdigest()[:24]
 
     def _evict(self) -> None:
         now = time.monotonic()
-        # Drop all expired first
         expired = [k for k, e in self._store.items() if now > e.expires_at]
         for k in expired:
-            del self._store[k]
-        # If still full, drop lowest-hit entry
+            self._store.pop(k, None)
+
         if len(self._store) >= self._max_size:
             lru_key = min(self._store, key=lambda k: self._store[k].hits)
-            del self._store[lru_key]
+            self._store.pop(lru_key, None)

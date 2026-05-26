@@ -1,5 +1,3 @@
-"""RouterShifter — core routing orchestrator."""
-
 from __future__ import annotations
 
 import asyncio
@@ -21,48 +19,7 @@ from lc_shift.strategies import STRATEGY_MAP, BaseStrategy
 
 
 class RouterShifter:
-    """Provider-agnostic LLM tier router.
-
-    Makes sub-millisecond routing decisions based on prompt complexity,
-    budget state, latency targets, or cascade priority — without calling
-    any LLM API itself.
-
-    Features
-    --------
-    - ``route()`` — single routing decision
-    - ``route_with_fallback()`` — ordered fallback chain, degraded tiers excluded
-    - ``route_batch()`` — concurrent routing for a list of requests
-    - ``mark_tier_failed()`` — signal a provider error; tier skipped for cooldown
-    - ``recover_tier()`` — manually clear a tier's degraded state
-    - ``record_usage()`` — update cost tracking after your LLM call
-    - ``snapshot()`` — rich metrics snapshot with per-tier stats and cache hit rate
-    - Observability hooks (``HookRegistry``) for logging / alerting / tracing
-    - In-memory decision cache (``RoutingCache``) for identical prompts
-    - Async context manager support
-
-    Basic usage::
-
-        config = RouterConfig(tiers=PRESETS["anthropic-3tier"], default_tier="balanced")
-        async with RouterShifter(config) as router:
-            decision = await router.route(ShiftRequest(prompt="Hello"))
-            result = await call_your_llm(decision.tier)
-            router.record_usage(decision.tier_name, input_tokens=50, output_tokens=200)
-
-    With hooks and cache::
-
-        hooks = HookRegistry()
-
-        @hooks.on_route
-        def log_decision(request, decision):
-            print(f"[{decision.tier_name}] {decision.overhead_ms:.2f}ms — {decision.reason}")
-
-        @hooks.on_fallback
-        async def alert(failed_tier, next_tier, exc):
-            await notify_team(f"{failed_tier} degraded → {next_tier}")
-
-        cache = RoutingCache(ttl_seconds=120)
-        router = RouterShifter(config, hooks=hooks, cache=cache)
-    """
+    """Orchestrates LLM prompt routing across configured model tiers."""
 
     __slots__ = (
         "_config",
@@ -84,12 +41,12 @@ class RouterShifter:
         cache: RoutingCache | None = None,
         hooks: HookRegistry | None = None,
     ) -> None:
-        cls = STRATEGY_MAP.get(config.strategy.value)
-        if cls is None:
+        strategy_class = STRATEGY_MAP.get(config.strategy.value)
+        if strategy_class is None:
             raise ConfigurationError(f"Unknown strategy: {config.strategy.value}")
 
         self._config = config
-        self._strategy: BaseStrategy = cls()
+        self._strategy: BaseStrategy = strategy_class()
         self._spent_usd: float = 0.0
         self._request_counts: dict[str, int] = {n: 0 for n in config.tiers}
         self._tier_metrics: dict[str, TierMetrics] = {
@@ -100,22 +57,13 @@ class RouterShifter:
         self._cache: RoutingCache | None = cache
         self._hooks: HookRegistry | None = hooks
 
-    # -------------------------------------------------------------------------
-    # Single routing decision
-    # -------------------------------------------------------------------------
-
     async def route(self, request: ShiftRequest) -> RoutingDecision:
-        """Return the best tier for *request*.
-
-        Raises ``BudgetExhaustedError`` when the budget is fully consumed.
-        Raises ``RoutingError`` for invalid ``force_tier`` values.
-        """
+        """Determines the best tier for the given request."""
         self._check_budget()
 
         if request.force_tier is not None:
             return self._make_forced(request)
 
-        # Cache lookup — identical prompts avoid re-scoring entirely
         if self._cache is not None:
             cached = self._cache.get(request.prompt, self._config.strategy.value)
             if cached is not None:
@@ -146,40 +94,12 @@ class RouterShifter:
 
         return decision
 
-    # -------------------------------------------------------------------------
-    # Fallback chain
-    # -------------------------------------------------------------------------
-
     async def route_with_fallback(self, request: ShiftRequest) -> FallbackChain:
-        """Return an ordered fallback chain of healthy tiers.
-
-        The first entry is the primary strategy decision. Degraded tiers are
-        skipped automatically and listed in ``FallbackChain.skipped_tiers``.
-        Remaining tiers are appended sorted cheapest-last so the chain degrades
-        gracefully in quality while spending less.
-
-        Example::
-
-            chain = await router.route_with_fallback(request)
-            for decision in chain:
-                try:
-                    result = await call_llm(decision.tier)
-                    router.record_usage(decision.tier_name, ...)
-                    break
-                except ProviderError as exc:
-                    router.mark_tier_failed(decision.tier_name)
-                    if router.hooks:
-                        await router.hooks.fire_fallback(
-                            decision.tier_name, "next", exc
-                        )
-            else:
-                raise RuntimeError("All tiers exhausted")
-        """
+        """Returns an ordered fallback chain of healthy tiers."""
         self._check_budget()
         skipped: list[str] = []
         decisions: list[RoutingDecision] = []
 
-        # Primary decision, skipping any degraded tier the strategy returns
         for _ in range(len(self._config.tiers)):
             t0 = time.perf_counter_ns()
             tier_name, reason = await self._strategy.decide(
@@ -199,7 +119,7 @@ class RouterShifter:
                 break
             if tier_name not in skipped:
                 skipped.append(tier_name)
-        # Append remaining healthy tiers as further fallbacks, cheapest last
+
         seen = {d.tier_name for d in decisions} | set(skipped)
         remaining = sorted(
             [(n, t) for n, t in self._config.tiers.items() if n not in seen],
@@ -216,56 +136,27 @@ class RouterShifter:
                         overhead_ms=0.0,
                     )
                 )
-            else:
-                if tier_name not in skipped:
-                    skipped.append(tier_name)
+            elif tier_name not in skipped:
+                skipped.append(tier_name)
 
         if not decisions:
             raise RoutingError(
-                f"All tiers are degraded — no healthy fallback. "
-                f"Skipped: {skipped}"
+                f"All tiers are degraded — no healthy fallback. Skipped: {skipped}"
             )
 
         return FallbackChain(tiers=decisions, skipped_tiers=skipped)
 
-    # -------------------------------------------------------------------------
-    # Batch routing
-    # -------------------------------------------------------------------------
-
     async def route_batch(
         self, requests: list[ShiftRequest]
     ) -> list[RoutingDecision]:
-        """Route multiple requests concurrently, preserving order.
-
-        Example::
-
-            decisions = await router.route_batch([
-                ShiftRequest(prompt="Simple question"),
-                ShiftRequest(prompt="Analyze this complex architecture..."),
-                ShiftRequest(prompt="Translate to French"),
-            ])
-        """
+        """Routes multiple requests concurrently, preserving order."""
         return list(await asyncio.gather(*[self.route(r) for r in requests]))
 
-    # -------------------------------------------------------------------------
-    # Tier health management
-    # -------------------------------------------------------------------------
-
     def mark_tier_failed(self, tier_name: str) -> None:
-        """Signal a provider error on *tier_name*.
-
-        The tier is excluded from routing for ``TierHealth.cooldown_seconds``
-        (default 60 s) and then automatically recovered.
-        """
         self._health.mark_failed(tier_name)
 
     def recover_tier(self, tier_name: str) -> None:
-        """Manually clear a tier's cooldown before it expires."""
         self._health.recover(tier_name)
-
-    # -------------------------------------------------------------------------
-    # Usage tracking
-    # -------------------------------------------------------------------------
 
     def record_usage(
         self,
@@ -273,7 +164,7 @@ class RouterShifter:
         input_tokens: int,
         output_tokens: int,
     ) -> None:
-        """Update cost accounting after your LLM API call completes."""
+        """Logs costs and token usage statistics for a specific tier."""
         if tier_name not in self._config.tiers:
             raise RoutingError(f"Unknown tier '{tier_name}'")
         tier = self._config.tiers[tier_name]
@@ -293,16 +184,8 @@ class RouterShifter:
                 self._hooks.fire_usage(tier_name, input_tokens, output_tokens)
             )
 
-    # -------------------------------------------------------------------------
-    # Metrics
-    # -------------------------------------------------------------------------
-
     def snapshot(self) -> CostSnapshot:
-        """Return a rich metrics snapshot.
-
-        Includes per-tier request counts, token usage, cost breakdown,
-        cache hit rate, and list of currently degraded tiers.
-        """
+        """Returns a metrics snapshot of the current router state."""
         budget = self._config.cost_budget_usd
         total = sum(self._request_counts.values())
         cache_hit_rate = (self._total_cache_hits / total) if total > 0 else 0.0
@@ -320,7 +203,6 @@ class RouterShifter:
         )
 
     def reset_tracking(self) -> None:
-        """Clear all cost, request, and cache state."""
         self._spent_usd = 0.0
         self._request_counts = {n: 0 for n in self._config.tiers}
         self._tier_metrics = {
@@ -329,10 +211,6 @@ class RouterShifter:
         self._total_cache_hits = 0
         if self._cache is not None:
             self._cache.clear()
-
-    # -------------------------------------------------------------------------
-    # Properties
-    # -------------------------------------------------------------------------
 
     @property
     def config(self) -> RouterConfig:
@@ -346,32 +224,23 @@ class RouterShifter:
     def hooks(self) -> HookRegistry | None:
         return self._hooks
 
-    # -------------------------------------------------------------------------
-    # Async context manager
-    # -------------------------------------------------------------------------
-
     async def __aenter__(self) -> RouterShifter:
         return self
 
     async def __aexit__(self, *_: object) -> None:
-        pass  # reserved for future HTTP session / connection cleanup
-
-    # -------------------------------------------------------------------------
-    # Internals
-    # -------------------------------------------------------------------------
+        pass
 
     def _check_budget(self) -> None:
         budget = self._config.cost_budget_usd
         if budget is not None and self._config.strategy != Strategy.COST_AWARE:
             if self._spent_usd >= budget:
                 raise BudgetExhaustedError(
-                    f"Budget of ${budget:.4f} exhausted "
-                    f"(spent ${self._spent_usd:.4f})"
+                    f"Budget of ${budget:.4f} exhausted (spent ${self._spent_usd:.4f})"
                 )
 
     def _make_forced(self, request: ShiftRequest) -> RoutingDecision:
-        tier_name = request.force_tier  # type: ignore[assignment]
-        if tier_name not in self._config.tiers:
+        tier_name = request.force_tier
+        if not tier_name or tier_name not in self._config.tiers:
             raise RoutingError(
                 f"force_tier '{tier_name}' not in config tiers: "
                 f"{list(self._config.tiers.keys())}"

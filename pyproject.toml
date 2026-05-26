@@ -1,6 +1,6 @@
 [project]
 name = "lc-shift"
-version = "0.1.0"
+version = "0.1.1"
 description = "Provider-agnostic LLM router — picks the right model tier per prompt based on complexity, budget, or latency. Sub-1ms, no API calls, 35 built-in providers."
 readme = "README.md"
 license = "MIT"

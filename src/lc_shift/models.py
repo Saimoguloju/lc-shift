@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Iterator
 from pydantic import BaseModel, Field
 
 from lc_shift.config import ModelTier
@@ -21,7 +22,7 @@ class RoutingDecision(BaseModel):
 
 
 class FallbackChain(BaseModel):
-    """Ordered list of tiers to try, with degraded tiers already excluded."""
+    """Ordered fallback chain representing fallback routing results."""
 
     tiers: list[RoutingDecision]
     skipped_tiers: list[str] = Field(default_factory=list)
@@ -30,7 +31,7 @@ class FallbackChain(BaseModel):
     def primary(self) -> RoutingDecision:
         return self.tiers[0]
 
-    def __iter__(self):  # type: ignore[override]
+    def __iter__(self) -> Iterator[RoutingDecision]:  # type: ignore[override]
         return iter(self.tiers)
 
     def __len__(self) -> int:
@@ -38,8 +39,6 @@ class FallbackChain(BaseModel):
 
 
 class TierMetrics(BaseModel):
-    """Per-tier usage statistics."""
-
     tier_name: str
     requests: int = 0
     estimated_cost_usd: float = 0.0
@@ -53,7 +52,6 @@ class CostSnapshot(BaseModel):
     estimated_cost_usd: float = 0.0
     budget_remaining_usd: float | None = None
     requests_by_tier: dict[str, int] = Field(default_factory=dict)
-    # Extended metrics
     tier_metrics: dict[str, TierMetrics] = Field(default_factory=dict)
     cache_hit_rate: float = 0.0
     degraded_tiers: list[str] = Field(default_factory=list)
