@@ -11,6 +11,7 @@ from lc_shift.hooks import HookRegistry
 from lc_shift.models import CostSnapshot, FallbackChain, RoutingDecision, ShiftRequest, TierMetrics
 from lc_shift.router import RouterShifter
 from lc_shift import providers
+from lc_shift.strategies import LocalTFIDF, SemanticStrategy, ClassifierStrategy
 from lc_shift.providers import (
     ALL_PROVIDERS,
     PRESETS,
@@ -60,7 +61,11 @@ __all__ = [
     "HookRegistry",
     "RoutingCache",
     "TierHealth",
+    "LocalTFIDF",
+    "SemanticStrategy",
+    "ClassifierStrategy",
     # Providers module
+
     "providers",
     "ALL_PROVIDERS",
     "PRESETS",

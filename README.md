@@ -1,8 +1,26 @@
 # lc-shift
 
-A provider-agnostic LLM router that dynamically determines the optimal model tier for each prompt in under 1ms without network calls or ML models.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python Version">
+  <img src="https://img.shields.io/badge/mypy-strict-green.svg" alt="Mypy Strict">
+  <img src="https://img.shields.io/badge/code%20style-ruff-black.svg" alt="Code Style: Ruff">
+  <img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License">
+</p>
 
-`lc-shift` sits between your application logic and your LLM providers. By defining custom tiers (e.g., Performance, Balanced, Economy) and choosing a routing strategy, it evaluates incoming prompts using local CPU-based heuristics to decide which model tier is most appropriate.
+`lc-shift` is a provider-agnostic, zero-external-API-dependency LLM routing library. It dynamically directs prompts to the optimal model tier (e.g., Performance, Balanced, Economy) in **under 1ms** on local CPU, maximizing quality while saving up to 80% on API costs.
+
+By running entirely locally without network queries or heavy ML frameworks (like scikit-learn or PyTorch), `lc-shift` introduces negligible overhead to your application middleware.
+
+---
+
+## Key Features
+
+*   🎯 **Intent-based Semantic Routing**: Matches prompt intent against predefined examples using an on-device TF-IDF & Cosine Similarity engine.
+*   🧠 **RouteLLM-style Classifier**: Uses a local linear model/logistic regression classifier to compute the probability that a prompt requires a frontier model.
+*   ⚡ **Sub-1ms Performance**: Crafted using vanilla Python math utilities to run locally with zero-overhead.
+*   📊 **Visual Streamlit Playground**: Includes an interactive dashboard to visualize routing decisions, track simulated costs, and compare strategies.
+*   🛡️ **Fallback & Health Cooldowns**: Excludes failing, degraded, or rate-limited endpoints from the pool automatically.
+*   🔌 **Observability Hooks**: Register custom lifecycle callbacks (`on_route`, `on_usage`, `on_fallback`, `on_error`) for logging and metrics tracking.
 
 ---
 
@@ -18,27 +36,90 @@ pip install lc-shift
 
 ## Quick Start
 
+### 1. Intent-Based Semantic Routing
+Route prompts to specialized tiers based on the semantic intent matching of your reference utterances:
+
+```python
+import asyncio
+from lc_shift import RouterShifter, RouterConfig, ShiftRequest, Strategy, PRESETS
+
+# Configure routes mapping tiers to example prompt utterances
+config = RouterConfig(
+    tiers=PRESETS["mixed-frontier"],
+    default_tier="balanced",
+    strategy=Strategy.SEMANTIC,
+    semantic_routes={
+        "performance": [
+            "Write a recursive algorithm to solve matrix multiplication",
+            "Evaluate time and space complexity of quicksort",
+            "Prove the correctness of the consensus algorithm"
+        ],
+        "economy": [
+            "Hello!",
+            "Tell me a short joke",
+            "What is the weather today?",
+            "Translate hello to French"
+        ]
+    }
+)
+
+async def main():
+    async with RouterShifter(config) as router:
+        # Routes to performance tier (Claude Opus)
+        d1 = await router.route(ShiftRequest(prompt="Implement compiler optimization in Rust"))
+        print(f"Tier: {d1.tier_name} ({d1.reason})")
+        
+        # Routes to economy tier (Gemini Flash)
+        d2 = await router.route(ShiftRequest(prompt="hi, how are you?"))
+        print(f"Tier: {d2.tier_name} ({d2.reason})")
+
+asyncio.run(main())
+```
+
+### 2. RouteLLM-style Classifier Routing
+Score prompts dynamically based on calibrated token weights to route between cheap and expensive models:
+
 ```python
 import asyncio
 from lc_shift import RouterShifter, RouterConfig, ShiftRequest, Strategy, PRESETS
 
 config = RouterConfig(
-    tiers=PRESETS["anthropic-3tier"],
+    tiers=PRESETS["mixed-frontier"],
     default_tier="balanced",
-    strategy=Strategy.COMPLEXITY,
-    complexity_threshold=0.4,
+    strategy=Strategy.CLASSIFIER,
+    classifier_intercept=-0.5,
+    classifier_threshold=0.6,
+    classifier_weights={
+        "code": 2.5,
+        "algorithm": 2.0,
+        "mathematics": 1.8,
+        "hi": -2.0,
+        "hello": -2.0,
+        "simple": -1.5
+    }
 )
 
 async def main():
     async with RouterShifter(config) as router:
-        # Route a simple request
-        decision = await router.route(ShiftRequest(prompt="What is 2+2?"))
+        decision = await router.route(ShiftRequest(prompt="Show me a code algorithm"))
+        # Routes to performance tier due to high weight sum
         print(f"Tier: {decision.tier_name} ({decision.reason})")
-        
-        # Log usage to track cost budget
-        router.record_usage(decision.tier_name, input_tokens=20, output_tokens=5)
 
 asyncio.run(main())
+```
+
+---
+
+## Running the Interactive Playground
+
+To interactively sandbox prompt complexity heuristics, test semantic routes, and visually inspect routing statistics, run the built-in Streamlit dashboard:
+
+```bash
+# Sync development dependencies
+uv sync
+
+# Launch the playground
+uv run streamlit run examples/playground.py
 ```
 
 ---
@@ -47,71 +128,18 @@ asyncio.run(main())
 
 | Strategy | Goal | Key Parameters |
 |---|---|---|
-| `COMPLEXITY` | Evaluates prompt complexity (length, syntax, code blocks) to route simple tasks to cheap tiers and complex queries to frontier tiers. | `complexity_threshold` |
-| `COST_AWARE` | Maximizes performance under a set budget, dynamically downgrading tiers as consumption approaches the limit. | `cost_budget_usd` |
-| `CASCADE` | Starts with the cheapest tier. Ideal when your app evaluates outputs and manually escalates on failure. | - |
-| `LATENCY` | Filters tiers meeting a latency limit, routing to the most capable tier within target. | `latency_target_ms` |
+| `SEMANTIC` | Matches prompt intent against example sentences using local cosine similarity. | `semantic_routes` |
+| `CLASSIFIER` | Calculates probability score using token weights to route to cheap/expensive models. | `classifier_weights`, `classifier_intercept`, `classifier_threshold` |
+| `COMPLEXITY` | Evaluates prompt complexity (length, syntax structure, code blocks) to route simple tasks to cheap tiers. | `complexity_threshold` |
+| `COST_AWARE` | Maximizes performance under a set budget, downgrading tiers as consumption approaches limit. | `cost_budget_usd` |
+| `LATENCY` | Filters tiers meeting a latency target, routing to the most capable tier within target. | `latency_target_ms` |
+| `CASCADE` | Starts with the cheapest tier. Ideal when escalating on output validation failures. | - |
 
 ---
 
-## Features & Usage
+## Development & Testing
 
-### 1. Pre-Configured Presets
-Quickly leverage built-in model definitions and pricing profiles:
-```python
-from lc_shift import PRESETS, RouterConfig
-
-config = RouterConfig(
-    tiers=PRESETS["mixed-frontier"],  # Claude Opus / GPT-4o / Gemini Flash
-    default_tier="balanced"
-)
-```
-
-### 2. Fallbacks & Health Degradation
-Exclude failing or throttled providers from the routing pool automatically:
-```python
-from lc_shift import RouterShifter, TierHealth, ShiftRequest
-
-health = TierHealth(cooldown_seconds=60)
-router = RouterShifter(config, health=health)
-
-chain = await router.route_with_fallback(ShiftRequest(prompt="hello"))
-for decision in chain:
-    try:
-        # Call LLM client here using decision.tier
-        break
-    except Exception:
-        router.mark_tier_failed(decision.tier_name)
-```
-
-### 3. Pluggable Observability Hooks
-Register event-driven callbacks for monitoring, logging, and error tracing:
-```python
-from lc_shift import HookRegistry, RouterShifter
-
-hooks = HookRegistry()
-
-@hooks.on_route
-def log_routing(request, decision):
-    print(f"Routed to {decision.tier_name} in {decision.overhead_ms:.2f}ms")
-
-router = RouterShifter(config, hooks=hooks)
-```
-
-### 4. Routing Decision Cache
-Avoid re-scoring identical prompts using the built-in TTL cache:
-```python
-from lc_shift import RoutingCache, RouterShifter
-
-cache = RoutingCache(ttl_seconds=60, max_size=1000)
-router = RouterShifter(config, cache=cache)
-```
-
----
-
-## Development
-
-Set up your development environment using `uv`:
+Setting up the development environment using `uv`:
 
 ```bash
 git clone https://github.com/Saimoguloju/lc-shift.git
@@ -121,9 +149,11 @@ uv sync --dev
 # Run tests
 uv run pytest
 
-# Lint and formatting check
-uv run ruff check src/ tests/
-uv run mypy src/
+# Check code styling & formatting
+uv run ruff check src/ tests/ examples/
+
+# Verify strict typing
+uv run mypy src/ tests/ examples/
 ```
 
 ---

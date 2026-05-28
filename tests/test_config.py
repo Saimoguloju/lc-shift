@@ -87,3 +87,37 @@ class TestRouterConfig:
         assert Strategy.COST_AWARE.value == "cost_aware"
         assert Strategy.CASCADE.value == "cascade"
         assert Strategy.LATENCY.value == "latency"
+        assert Strategy.SEMANTIC.value == "semantic"
+        assert Strategy.CLASSIFIER.value == "classifier"
+
+    def test_semantic_requires_routes(self) -> None:
+        tier = ModelTier(
+            name="T",
+            provider="x",
+            model_id="x",
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            avg_latency_ms=100,
+        )
+        with pytest.raises(ValidationError, match="semantic_routes must be provided"):
+            RouterConfig(
+                tiers={"t": tier},
+                default_tier="t",
+                strategy=Strategy.SEMANTIC,
+            )
+
+    def test_classifier_requires_weights(self) -> None:
+        tier = ModelTier(
+            name="T",
+            provider="x",
+            model_id="x",
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            avg_latency_ms=100,
+        )
+        with pytest.raises(ValidationError, match="classifier_weights must be provided"):
+            RouterConfig(
+                tiers={"t": tier},
+                default_tier="t",
+                strategy=Strategy.CLASSIFIER,
+            )

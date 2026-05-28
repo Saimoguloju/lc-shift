@@ -162,3 +162,88 @@ class TestLatencyStrategy:
         req = ShiftRequest(prompt="test prompt")
         tier_name, _ = await strategy.decide(req, three_tier_config, 0.0)
         assert tier_name == "balanced"
+
+
+class TestLocalTFIDF:
+    def test_fit_and_transform(self) -> None:
+        from lc_shift.strategies import LocalTFIDF
+        tfidf = LocalTFIDF()
+        docs = [
+            "write some python code for sorting list",
+            "explain the mathematical proof of theory",
+            "say a simple hello to user"
+        ]
+        tfidf.fit(docs)
+        assert len(tfidf.vocab) > 0
+        
+        v1 = tfidf.transform("write python code")
+        v2 = tfidf.transform("explain mathematical proof")
+        v3 = tfidf.transform("write python code")
+        
+        sim_same = LocalTFIDF.cosine_similarity(v1, v3)
+        sim_diff = LocalTFIDF.cosine_similarity(v1, v2)
+        
+        assert sim_same == pytest.approx(1.0)
+        assert sim_diff < 0.2
+
+
+class TestSemanticStrategy:
+    @pytest.mark.asyncio
+    async def test_semantic_routing_selection(
+        self, three_tier_config: RouterConfig
+    ) -> None:
+        from lc_shift.strategies import SemanticStrategy
+        config = three_tier_config.model_copy(
+            update={
+                "strategy": Strategy.SEMANTIC,
+                "semantic_routes": {
+                    "performance": ["write some complex rust code for memory management", "compile compiler optimization"],
+                    "economy": ["hi", "hello there", "what's up"]
+                }
+            }
+        )
+        strategy = SemanticStrategy()
+        
+        req_code = ShiftRequest(prompt="implement compiler rust code optimizations")
+        tier_code, reason_code = await strategy.decide(req_code, config, 0.0)
+        assert tier_code == "performance"
+        assert "semantic match" in reason_code
+        
+        req_greet = ShiftRequest(prompt="hello there friend")
+        tier_greet, reason_greet = await strategy.decide(req_greet, config, 0.0)
+        assert tier_greet == "economy"
+        
+        req_unrelated = ShiftRequest(prompt="xyzabc123")
+        tier_unrelated, reason_unrelated = await strategy.decide(req_unrelated, config, 0.0)
+        assert tier_unrelated == config.default_tier
+
+
+class TestClassifierStrategy:
+    @pytest.mark.asyncio
+    async def test_classifier_routing_selection(
+        self, three_tier_config: RouterConfig
+    ) -> None:
+        from lc_shift.strategies import ClassifierStrategy
+        config = three_tier_config.model_copy(
+            update={
+                "strategy": Strategy.CLASSIFIER,
+                "classifier_weights": {
+                    "code": 2.5,
+                    "optimize": 1.5,
+                    "hi": -2.0,
+                    "simple": -1.5
+                },
+                "classifier_intercept": -0.5,
+                "classifier_threshold": 0.6
+            }
+        )
+        strategy = ClassifierStrategy()
+        
+        req_perf = ShiftRequest(prompt="code optimize")
+        tier_perf, reason_perf = await strategy.decide(req_perf, config, 0.0)
+        assert tier_perf == "performance"
+        assert "classifier probability" in reason_perf
+        
+        req_econ = ShiftRequest(prompt="hi simple")
+        tier_econ, reason_econ = await strategy.decide(req_econ, config, 0.0)
+        assert tier_econ == "economy"

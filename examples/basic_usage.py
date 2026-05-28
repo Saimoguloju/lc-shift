@@ -9,6 +9,7 @@ from lc_shift import (
     RouterConfig,
     RouterShifter,
     ShiftRequest,
+    RoutingDecision,
     Strategy,
     HookRegistry,
     RoutingCache,
@@ -75,16 +76,16 @@ async def example_hooks() -> None:
     hooks = HookRegistry()
 
     @hooks.on_route
-    def log_route(request, decision):
+    def log_route(request: ShiftRequest, decision: RoutingDecision) -> None:
         tag = "[CACHE]" if decision.cache_hit else f"[{decision.overhead_ms:.2f}ms]"
         print(f"  HOOK on_route  {tag} -> {decision.tier_name}: {decision.reason}")
 
     @hooks.on_usage
-    def log_usage(tier_name, input_tokens, output_tokens):
+    def log_usage(tier_name: str, input_tokens: int, output_tokens: int) -> None:
         print(f"  HOOK on_usage  {tier_name}: {input_tokens}in / {output_tokens}out tokens")
 
     @hooks.on_fallback
-    async def log_fallback(failed_tier, next_tier, exc):
+    async def log_fallback(failed_tier: str, next_tier: str, exc: Exception) -> None:
         print(f"  HOOK on_fallback  {failed_tier} failed -> trying {next_tier}")
 
     config = RouterConfig(
