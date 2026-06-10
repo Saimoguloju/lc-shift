@@ -6,12 +6,19 @@ from lc_shift.exceptions import (
     LCShiftError,
     RoutingError,
 )
+from lc_shift.eval import BenchmarkResult, EvalRecord, evaluate, load_dataset
 from lc_shift.health import TierHealth
 from lc_shift.hooks import HookRegistry
 from lc_shift.models import CostSnapshot, FallbackChain, RoutingDecision, ShiftRequest, TierMetrics
 from lc_shift.router import RouterShifter
 from lc_shift import providers
-from lc_shift.strategies import LocalTFIDF, SemanticStrategy, ClassifierStrategy
+from lc_shift.strategies import (
+    ClassifierStrategy,
+    EnsembleStrategy,
+    KNNStrategy,
+    LocalTFIDF,
+    SemanticStrategy,
+)
 from lc_shift.providers import (
     ALL_PROVIDERS,
     PRESETS,
@@ -64,6 +71,13 @@ __all__ = [
     "LocalTFIDF",
     "SemanticStrategy",
     "ClassifierStrategy",
+    "KNNStrategy",
+    "EnsembleStrategy",
+    # Evaluation harness
+    "evaluate",
+    "load_dataset",
+    "BenchmarkResult",
+    "EvalRecord",
     # Providers module
 
     "providers",
@@ -96,4 +110,4 @@ __all__ = [
     "SGLANG",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"

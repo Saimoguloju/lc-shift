@@ -17,6 +17,10 @@ By running entirely locally without network queries or heavy ML frameworks (like
 
 *   🎯 **Intent-based Semantic Routing**: Matches prompt intent against predefined examples using an on-device TF-IDF & Cosine Similarity engine.
 *   🧠 **RouteLLM-style Classifier**: Uses a local linear model/logistic regression classifier to compute the probability that a prompt requires a frontier model.
+*   🤝 **kNN Router with Online Learning**: Non-parametric k-nearest-neighbour routing that adapts at runtime via `router.learn()`. Recent research ([*"When Simple kNN Beats Complex Learned Routers"*, arXiv:2505.12601](https://arxiv.org/pdf/2505.12601)) shows this approach rivals heavyweight learned routers.
+*   🗳️ **Ensemble Routing**: Combine complexity, classifier, and semantic signals into a single weighted vote to hedge any one signal's blind spots.
+*   📏 **Built-in Evaluation Harness**: Score any strategy on a labelled dataset with RouteLLM-style **cost-quality metrics** (accuracy, quality-preserved, cost-savings %) — the evidence real router benchmarks (RouteLLM, RouterBench) are judged on.
+*   🖥️ **Zero-dependency CLI**: `lc-shift route`, `lc-shift bench`, and `lc-shift providers` for routing and benchmarking from the terminal.
 *   ⚡ **Sub-1ms Performance**: Crafted using vanilla Python math utilities to run locally with zero-overhead.
 *   📊 **Visual Streamlit Playground**: Includes an interactive dashboard to visualize routing decisions, track simulated costs, and compare strategies.
 *   🛡️ **Fallback & Health Cooldowns**: Excludes failing, degraded, or rate-limited endpoints from the pool automatically.
@@ -130,10 +134,104 @@ uv run streamlit run examples/playground.py
 |---|---|---|
 | `SEMANTIC` | Matches prompt intent against example sentences using local cosine similarity. | `semantic_routes` |
 | `CLASSIFIER` | Calculates probability score using token weights to route to cheap/expensive models. | `classifier_weights`, `classifier_intercept`, `classifier_threshold` |
+| `KNN` | k-nearest-neighbour voting over labelled examples in local TF-IDF space; supports online learning. | `knn_examples`, `knn_k` |
+| `ENSEMBLE` | Weighted vote across complexity, classifier, and semantic signals. | `ensemble_weights` |
 | `COMPLEXITY` | Evaluates prompt complexity (length, syntax structure, code blocks) to route simple tasks to cheap tiers. | `complexity_threshold` |
 | `COST_AWARE` | Maximizes performance under a set budget, downgrading tiers as consumption approaches limit. | `cost_budget_usd` |
 | `LATENCY` | Filters tiers meeting a latency target, routing to the most capable tier within target. | `latency_target_ms` |
 | `CASCADE` | Starts with the cheapest tier. Ideal when escalating on output validation failures. | - |
+
+---
+
+## Adaptive kNN Routing & Online Learning
+
+The kNN router stores labelled example prompts per tier and routes by similarity-weighted
+voting over the `k` nearest neighbours. It learns from feedback at runtime — no retraining,
+no network, no ML framework:
+
+```python
+import asyncio
+from lc_shift import RouterShifter, RouterConfig, ShiftRequest, Strategy, PRESETS
+
+config = RouterConfig(
+    tiers=PRESETS["mixed-frontier"],
+    default_tier="balanced",
+    strategy=Strategy.KNN,
+    knn_k=3,
+    knn_examples={
+        "performance": ["prove the correctness of a consensus algorithm",
+                        "analyze and derive the complexity of quicksort"],
+        "economy":     ["hello there", "tell me a joke", "capital of japan"],
+    },
+)
+
+async def main():
+    async with RouterShifter(config) as router:
+        d = await router.route(ShiftRequest(prompt="what is the weather like?"))
+        print(d.tier_name)                       # -> default/economy
+
+        # Teach the router from feedback; future similar prompts follow.
+        router.learn("what is the weather like?", "economy")
+        d = await router.route(ShiftRequest(prompt="what is the weather today?"))
+        print(d.tier_name)                       # -> economy
+
+asyncio.run(main())
+```
+
+---
+
+## Benchmarking Strategies (Cost-Quality Evaluation)
+
+Routers should be judged on the **cost-quality trade-off**, not features. The built-in
+evaluation harness scores any strategy on a labelled JSONL dataset and reports how much
+cost it saves versus always calling the strongest tier, and how much quality it preserves.
+
+```bash
+uv run python examples/benchmark.py
+```
+
+Sample run (20 prompts, `mixed-frontier` preset):
+
+| strategy | accuracy | quality preserved | cost savings | overhead |
+|---|---|---|---|---|
+| complexity | 45.0% | 45.0% | 94.6% | 0.011 ms |
+| semantic | 80.0% | **100.0%** | 58.7% | 0.031 ms |
+| classifier | 70.0% | 70.0% | 69.7% | 0.009 ms |
+| **knn** | **80.0%** | **100.0%** | 58.7% | 0.032 ms |
+| ensemble | 65.0% | 70.0% | 64.7% | 0.065 ms |
+
+> *quality preserved* = share of prompts never under-routed (no quality loss).
+> *cost savings* = reduction vs. sending every prompt to the strongest tier.
+
+Programmatically:
+
+```python
+from lc_shift import evaluate, load_dataset, RouterShifter, RouterConfig, Strategy, PRESETS
+
+dataset = load_dataset("examples/benchmark_dataset.jsonl")
+router = RouterShifter(RouterConfig(tiers=PRESETS["mixed-frontier"],
+                                    default_tier="balanced", strategy=Strategy.COMPLEXITY))
+result = await evaluate(router, dataset)
+print(result.format_report())
+```
+
+---
+
+## Command-Line Interface
+
+```bash
+# List all 35 providers and presets
+lc-shift providers
+
+# Route a single prompt
+lc-shift route "Prove the CAP theorem" --preset mixed-frontier --strategy complexity
+
+# Benchmark a strategy on a dataset
+lc-shift bench examples/benchmark_dataset.jsonl --preset mixed-frontier --strategy cascade
+
+# Use a full RouterConfig JSON (required for knn / semantic / classifier / ensemble)
+lc-shift bench examples/benchmark_dataset.jsonl --config examples/knn_config.json
+```
 
 ---
 

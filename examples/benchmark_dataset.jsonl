@@ -1,0 +1,20 @@
+{"prompt": "What is 2 + 2?", "ideal_tier": "economy"}
+{"prompt": "Say hello to the user.", "ideal_tier": "economy"}
+{"prompt": "Translate 'good morning' to French.", "ideal_tier": "economy"}
+{"prompt": "What is the capital of Japan?", "ideal_tier": "economy"}
+{"prompt": "Tell me a short joke.", "ideal_tier": "economy"}
+{"prompt": "Convert 10 kilometers to miles.", "ideal_tier": "economy"}
+{"prompt": "What day comes after Tuesday?", "ideal_tier": "economy"}
+{"prompt": "Summarize what a REST API is in one sentence.", "ideal_tier": "balanced"}
+{"prompt": "Write a Python function to reverse a string and explain it briefly.", "ideal_tier": "balanced"}
+{"prompt": "Compare SQL and NoSQL databases for a small startup.", "ideal_tier": "balanced"}
+{"prompt": "Explain how a hash map works with an example.", "ideal_tier": "balanced"}
+{"prompt": "Draft a polite email asking for a project deadline extension.", "ideal_tier": "balanced"}
+{"prompt": "Analyze and compare the trade-off between readability and performance in this recursive code. Explain why one approach is better.\n```python\ndef fib(n):\n    return fib(n-1)+fib(n-2) if n>1 else n\n```\n1. Evaluate time complexity\n2. Assess space complexity\n3. Justify the production choice", "ideal_tier": "performance"}
+{"prompt": "Prove the correctness of a distributed consensus algorithm. Derive the safety and liveness guarantees, and analyze how they behave under network partitions and Byzantine faults.", "ideal_tier": "performance"}
+{"prompt": "Design a horizontally scalable, fault-tolerant rate limiter with Redis. Provide the implementation, analyze the trade-offs of sliding-window vs token-bucket, and evaluate failure modes under high concurrency.", "ideal_tier": "performance"}
+{"prompt": "Synthesize a formal proof for the time and space complexity of quicksort in the average and worst case. Critique the pivot-selection strategies and justify which to use in production.", "ideal_tier": "performance"}
+{"prompt": "Evaluate and contrast three approaches to compiler optimization for a JIT runtime. Analyze register allocation trade-offs and derive the implications for tail-call performance.", "ideal_tier": "performance"}
+{"prompt": "What time is it in London right now?", "ideal_tier": "economy"}
+{"prompt": "Refactor this function for readability and explain the changes step by step.", "ideal_tier": "balanced"}
+{"prompt": "Analyze the security implications of using JWTs for session storage in single-page apps, compare against server-side sessions, and justify a recommendation.", "ideal_tier": "performance"}

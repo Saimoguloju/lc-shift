@@ -324,6 +324,144 @@ class ClassifierStrategy(BaseStrategy):
         return name, reason
 
 
+class KNNStrategy(BaseStrategy):
+    """k-Nearest-Neighbours router over the local TF-IDF space.
+
+    Stores labelled example prompts per tier and, for each request, finds the
+    ``k`` most similar examples and casts a similarity-weighted vote for their
+    tiers. Unlike :class:`SemanticStrategy` (single best match), kNN aggregates
+    several neighbours, which is far more robust to noisy or ambiguous prompts.
+
+    Recent research ("When Simple kNN Beats Complex Learned Routers",
+    arXiv:2505.12601) shows this non-parametric approach rivals heavyweight
+    learned routers — while keeping lc-shift's zero-dependency, sub-1ms profile.
+
+    Supports **online learning**: call :meth:`learn` (via ``RouterShifter.learn``)
+    to add a labelled example at runtime; the index is rebuilt lazily on the next
+    decision.
+    """
+
+    __slots__ = ("_tfidf", "_examples", "_vectors", "_runtime", "_fitted")
+
+    def __init__(self) -> None:
+        self._tfidf = LocalTFIDF()
+        self._examples: list[tuple[str, str]] = []  # (prompt, tier_name)
+        self._vectors: list[dict[str, float]] = []
+        self._runtime: list[tuple[str, str]] = []
+        self._fitted = False
+
+    def learn(self, prompt: str, tier_name: str) -> None:
+        """Add a labelled example at runtime and invalidate the fitted index."""
+        if prompt.strip():
+            self._runtime.append((prompt, tier_name))
+            self._fitted = False
+
+    def _fit(self, config: RouterConfig) -> None:
+        if self._fitted:
+            return
+
+        examples: list[tuple[str, str]] = []
+        for tier_name, prompts in (config.knn_examples or {}).items():
+            examples.extend((p, tier_name) for p in prompts if p.strip())
+        examples.extend(self._runtime)
+
+        self._examples = examples
+        if examples:
+            self._tfidf.fit([p for p, _ in examples])
+            self._vectors = [self._tfidf.transform(p) for p, _ in examples]
+        else:
+            self._vectors = []
+        self._fitted = True
+
+    async def decide(
+        self,
+        request: ShiftRequest,
+        config: RouterConfig,
+        spent_usd: float,
+    ) -> tuple[str, str]:
+        if not config.knn_examples and not self._runtime:
+            return config.default_tier, "knn_examples not configured; using default tier"
+
+        self._fit(config)
+        if not self._examples:
+            return config.default_tier, "no knn examples available; using default tier"
+
+        prompt_vec = self._tfidf.transform(request.prompt)
+        if not prompt_vec:
+            return config.default_tier, "empty prompt; using default tier"
+
+        scored = [
+            (self._tfidf.cosine_similarity(prompt_vec, vec), tier)
+            for vec, (_, tier) in zip(self._vectors, self._examples)
+        ]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        k = min(config.knn_k, len(scored))
+        neighbours = scored[:k]
+
+        if neighbours[0][0] <= 0.0:
+            return config.default_tier, "no knn neighbour matched (similarity=0.0); using default tier"
+
+        votes: dict[str, float] = {}
+        for sim, tier in neighbours:
+            if sim > 0.0:
+                votes[tier] = votes.get(tier, 0.0) + sim
+
+        best_tier = max(votes, key=lambda t: votes[t])
+        return best_tier, (
+            f"knn vote over {k} neighbours (weight={votes[best_tier]:.3f}, "
+            f"top_sim={neighbours[0][0]:.3f})"
+        )
+
+
+class EnsembleStrategy(BaseStrategy):
+    """Weighted multi-signal router that combines several base strategies.
+
+    Each configured member casts a vote for its chosen tier; votes are summed by
+    the member's weight and the highest-scoring tier wins. This hedges the blind
+    spots of any single signal (e.g. complexity heuristics vs. semantic intent).
+    """
+
+    __slots__ = ("_members",)
+
+    _AVAILABLE: dict[str, type[BaseStrategy]] = {
+        "complexity": ComplexityStrategy,
+        "classifier": ClassifierStrategy,
+        "semantic": SemanticStrategy,
+    }
+
+    def __init__(self) -> None:
+        self._members: dict[str, BaseStrategy] = {}
+
+    async def decide(
+        self,
+        request: ShiftRequest,
+        config: RouterConfig,
+        spent_usd: float,
+    ) -> tuple[str, str]:
+        weights = config.ensemble_weights or {}
+        if not weights:
+            return config.default_tier, "ensemble_weights not configured; using default tier"
+
+        votes: dict[str, float] = {}
+        for name, weight in weights.items():
+            strat = self._members.get(name)
+            if strat is None:
+                cls = self._AVAILABLE.get(name)
+                if cls is None:
+                    continue
+                strat = cls()
+                self._members[name] = strat
+            tier, _ = await strat.decide(request, config, spent_usd)
+            votes[tier] = votes.get(tier, 0.0) + weight
+
+        if not votes:
+            return config.default_tier, "no ensemble members voted; using default tier"
+
+        best_tier = max(votes, key=lambda t: votes[t])
+        breakdown = ", ".join(f"{t}={w:.2f}" for t, w in sorted(votes.items()))
+        return best_tier, f"ensemble vote ({breakdown})"
+
+
 STRATEGY_MAP: dict[str, type[BaseStrategy]] = {
     "complexity": ComplexityStrategy,
     "cost_aware": CostAwareStrategy,
@@ -331,4 +469,6 @@ STRATEGY_MAP: dict[str, type[BaseStrategy]] = {
     "latency": LatencyStrategy,
     "semantic": SemanticStrategy,
     "classifier": ClassifierStrategy,
+    "knn": KNNStrategy,
+    "ensemble": EnsembleStrategy,
 }

@@ -15,7 +15,7 @@ from lc_shift.models import (
     ShiftRequest,
     TierMetrics,
 )
-from lc_shift.strategies import STRATEGY_MAP, BaseStrategy
+from lc_shift.strategies import STRATEGY_MAP, BaseStrategy, KNNStrategy
 
 
 class RouterShifter:
@@ -149,6 +149,28 @@ class RouterShifter:
     ) -> list[RoutingDecision]:
         """Routes multiple requests concurrently, preserving order."""
         return list(await asyncio.gather(*[self.route(r) for r in requests]))
+
+    def learn(self, prompt: str, tier_name: str) -> None:
+        """Teach the router from feedback (online learning).
+
+        Adds a labelled example so future, semantically-similar prompts route to
+        ``tier_name``. Only meaningful for the KNN strategy; raises for others so
+        misuse surfaces early. The next decision rebuilds the index lazily, and
+        cached decisions for the strategy are invalidated.
+        """
+        if tier_name not in self._config.tiers:
+            raise RoutingError(
+                f"learn() tier '{tier_name}' not in config tiers: "
+                f"{list(self._config.tiers.keys())}"
+            )
+        if not isinstance(self._strategy, KNNStrategy):
+            raise RoutingError(
+                f"learn() requires the 'knn' strategy, but router uses "
+                f"'{self._config.strategy.value}'"
+            )
+        self._strategy.learn(prompt, tier_name)
+        if self._cache is not None:
+            self._cache.clear()
 
     def mark_tier_failed(self, tier_name: str) -> None:
         self._health.mark_failed(tier_name)

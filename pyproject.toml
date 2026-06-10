@@ -1,7 +1,7 @@
 [project]
 name = "lc-shift"
-version = "0.1.1"
-description = "Provider-agnostic LLM router — picks the right model tier per prompt based on complexity, budget, or latency. Sub-1ms, no API calls, 35 built-in providers."
+version = "0.2.0"
+description = "Provider-agnostic LLM router — picks the right model tier per prompt via complexity, kNN, classifier, semantic, ensemble, budget, or latency. Sub-1ms, no API calls, built-in cost-quality benchmarking, CLI, 35 providers."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -26,6 +26,9 @@ classifiers = [
 ]
 
 dependencies = ["pydantic>=2.0,<3.0"]
+
+[project.scripts]
+lc-shift = "lc_shift.cli:main"
 
 [dependency-groups]
 dev = [

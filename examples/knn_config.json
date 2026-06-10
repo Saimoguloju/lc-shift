@@ -1,0 +1,52 @@
+{
+  "tiers": {
+    "performance": {
+      "name": "Claude Opus 4.6",
+      "provider": "anthropic",
+      "model_id": "claude-opus-4-6",
+      "cost_per_1k_input": 0.015,
+      "cost_per_1k_output": 0.075,
+      "avg_latency_ms": 2500,
+      "max_tokens": 8192
+    },
+    "balanced": {
+      "name": "GPT-4o",
+      "provider": "openai",
+      "model_id": "gpt-4o",
+      "cost_per_1k_input": 0.0025,
+      "cost_per_1k_output": 0.01,
+      "avg_latency_ms": 1000,
+      "max_tokens": 8192
+    },
+    "economy": {
+      "name": "Gemini Flash",
+      "provider": "google",
+      "model_id": "gemini-3-flash-preview",
+      "cost_per_1k_input": 0.000075,
+      "cost_per_1k_output": 0.0003,
+      "avg_latency_ms": 500,
+      "max_tokens": 8192
+    }
+  },
+  "default_tier": "balanced",
+  "strategy": "knn",
+  "knn_k": 3,
+  "knn_examples": {
+    "performance": [
+      "prove the correctness of a distributed consensus algorithm",
+      "analyze and derive the time and space complexity of quicksort",
+      "design a scalable fault tolerant rate limiter and evaluate trade-offs"
+    ],
+    "balanced": [
+      "write a python function and explain how it works",
+      "compare sql and nosql databases for a startup",
+      "summarize what a rest api is"
+    ],
+    "economy": [
+      "hello there",
+      "what is the capital of japan",
+      "tell me a short joke",
+      "translate good morning to french"
+    ]
+  }
+}
