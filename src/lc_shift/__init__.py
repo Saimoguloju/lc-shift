@@ -6,8 +6,10 @@ from lc_shift.exceptions import (
     LCShiftError,
     RoutingError,
 )
+from lc_shift.agent import AgentRouter, EscalationAttempt, EscalationResult
 from lc_shift.eval import BenchmarkResult, EvalRecord, evaluate, load_dataset
 from lc_shift.health import TierHealth
+from lc_shift.mcp import MCPServer, serve_stdio
 from lc_shift.hooks import HookRegistry
 from lc_shift.models import CostSnapshot, FallbackChain, RoutingDecision, ShiftRequest, TierMetrics
 from lc_shift.router import RouterShifter
@@ -18,6 +20,7 @@ from lc_shift.strategies import (
     EnsembleStrategy,
     KNNStrategy,
     LocalTFIDF,
+    RoleStrategy,
     SemanticStrategy,
 )
 from lc_shift.providers import (
@@ -74,6 +77,7 @@ __all__ = [
     "ClassifierStrategy",
     "KNNStrategy",
     "EnsembleStrategy",
+    "RoleStrategy",
     # Evaluation harness
     "evaluate",
     "load_dataset",
@@ -83,6 +87,13 @@ __all__ = [
     "serve",
     "create_server",
     "BackendConfig",
+    # Agentic routing
+    "AgentRouter",
+    "EscalationResult",
+    "EscalationAttempt",
+    # MCP server
+    "MCPServer",
+    "serve_stdio",
     # Providers module
 
     "providers",
@@ -115,4 +126,4 @@ __all__ = [
     "SGLANG",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

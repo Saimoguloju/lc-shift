@@ -462,6 +462,35 @@ class EnsembleStrategy(BaseStrategy):
         return best_tier, f"ensemble vote ({breakdown})"
 
 
+class RoleStrategy(BaseStrategy):
+    """Route by the agent role carried in ``request.metadata['role']``.
+
+    Agent loops issue many calls with very different difficulty — a *planner*
+    step deserves a frontier model while a *tool_select* or *summarize* step does
+    not. Map each role to a tier and every step of the loop is cost-routed::
+
+        config.role_routes = {"planner": "performance", "tool_select": "economy"}
+        request = ShiftRequest(prompt=..., metadata={"role": "planner"})
+    """
+
+    __slots__ = ()
+
+    async def decide(
+        self,
+        request: ShiftRequest,
+        config: RouterConfig,
+        spent_usd: float,
+    ) -> tuple[str, str]:
+        routes = config.role_routes or {}
+        role = request.metadata.get("role")
+        if role is None:
+            return config.default_tier, "no 'role' in metadata; using default tier"
+        tier = routes.get(role)
+        if tier is None:
+            return config.default_tier, f"role '{role}' not mapped; using default tier"
+        return tier, f"role '{role}' -> {tier}"
+
+
 STRATEGY_MAP: dict[str, type[BaseStrategy]] = {
     "complexity": ComplexityStrategy,
     "cost_aware": CostAwareStrategy,
@@ -471,4 +500,5 @@ STRATEGY_MAP: dict[str, type[BaseStrategy]] = {
     "classifier": ClassifierStrategy,
     "knn": KNNStrategy,
     "ensemble": EnsembleStrategy,
+    "role": RoleStrategy,
 }

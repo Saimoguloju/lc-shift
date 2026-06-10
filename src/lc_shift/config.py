@@ -25,6 +25,7 @@ class Strategy(str, Enum):
     CLASSIFIER = "classifier"
     KNN = "knn"
     ENSEMBLE = "ensemble"
+    ROLE = "role"
 
 
 class RouterConfig(BaseModel):
@@ -49,6 +50,9 @@ class RouterConfig(BaseModel):
 
     # Ensemble Routing config — strategy name -> vote weight
     ensemble_weights: dict[str, float] | None = None
+
+    # Role Routing config (agent loops) — agent role -> tier name
+    role_routes: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def _validate_config(self) -> RouterConfig:
@@ -79,6 +83,16 @@ class RouterConfig(BaseModel):
                 if tier_name not in self.tiers:
                     raise ValueError(
                         f"knn_examples key '{tier_name}' must be a valid tier in tiers: "
+                        f"{list(self.tiers.keys())}"
+                    )
+
+        if self.strategy == Strategy.ROLE:
+            if not self.role_routes:
+                raise ValueError("role_routes must be provided when strategy is 'role'")
+            for role, tier_name in self.role_routes.items():
+                if tier_name not in self.tiers:
+                    raise ValueError(
+                        f"role_routes['{role}'] -> '{tier_name}' must be a valid tier in tiers: "
                         f"{list(self.tiers.keys())}"
                     )
 

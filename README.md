@@ -16,6 +16,8 @@ By running entirely locally without network queries or heavy ML frameworks (like
 ## Key Features
 
 *   🔌 **Drop-in OpenAI-Compatible Proxy**: Point any OpenAI SDK at lc-shift and it transparently routes each request to the optimal model tier — **no code changes**. Pure standard library (`http.server` + `urllib`), so the proxy keeps the zero-dependency promise.
+*   🧩 **Native MCP Server**: Exposes routing as Model Context Protocol tools (`route_prompt`, `estimate_cost`, `list_tiers`) for Claude Desktop, Cursor, and agent runtimes — a from-scratch, spec-compliant (`2025-06-18`) JSON-RPC/stdio server with **zero dependencies**.
+*   🤖 **Agent-Loop Routing**: Route each agent step by role (`planner` → frontier, `tool_select` → cheap) and run **cheap-first escalation** that climbs to a stronger model only when a validation check fails.
 *   🎯 **Intent-based Semantic Routing**: Matches prompt intent against predefined examples using an on-device TF-IDF & Cosine Similarity engine.
 *   🧠 **RouteLLM-style Classifier**: Uses a local linear model/logistic regression classifier to compute the probability that a prompt requires a frontier model.
 *   🤝 **kNN Router with Online Learning**: Non-parametric k-nearest-neighbour routing that adapts at runtime via `router.learn()`. Recent research ([*"When Simple kNN Beats Complex Learned Routers"*, arXiv:2505.12601](https://arxiv.org/pdf/2505.12601)) shows this approach rivals heavyweight learned routers.
@@ -80,6 +82,67 @@ docker build -t lc-shift .
 docker run -p 8000:8000 lc-shift \
   serve --backend http://host.docker.internal:11434/v1 --host 0.0.0.0
 ```
+
+---
+
+## For the Agentic Era
+
+### Agent-Loop Routing (role + escalation)
+
+A single agent task fans out into many LLM calls of very different difficulty.
+lc-shift routes each step to a tier that fits it, and escalates only when needed.
+
+```python
+import asyncio
+from lc_shift import AgentRouter, RouterShifter, RouterConfig, Strategy, PRESETS
+
+# 1) Role routing — one tier per agent step
+config = RouterConfig(
+    tiers=PRESETS["mixed-frontier"], default_tier="balanced", strategy=Strategy.ROLE,
+    role_routes={"planner": "performance", "tool_select": "economy", "summarize": "economy"},
+)
+agent = AgentRouter(RouterShifter(config))
+
+async def main():
+    d = await agent.route_step("Plan the tool calls", role="planner")
+    print(d.tier_name)                       # -> performance (frontier model)
+
+    # 2) Cheap-first escalation — climb only when validation fails
+    async def call(tier, prompt):            # your real model call goes here
+        return '{"ok": true}' if "Opus" in tier.name else "not sure"
+
+    result = await agent.run_with_escalation(
+        "Return JSON.", call, validate=lambda o: o.startswith("{"))
+    print(result.tier_name, result.success, result.escalated)   # performance True True
+
+asyncio.run(main())
+```
+
+See [examples/agent_loop.py](examples/agent_loop.py) for a runnable demo. Because the
+proxy is OpenAI-compatible, **any** agent framework (OpenAI Agents SDK, LangGraph,
+CrewAI, LlamaIndex) can also route through lc-shift with zero code — just set `base_url`.
+
+### MCP Server
+
+Expose the router to MCP hosts (Claude Desktop, Cursor, agent runtimes) as tools.
+It's a from-scratch, dependency-free implementation of MCP's JSON-RPC/stdio transport.
+
+```bash
+lc-shift mcp --preset mixed-frontier --strategy complexity
+```
+
+Register it with an MCP host (e.g. Claude Desktop `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "lc-shift": { "command": "lc-shift", "args": ["mcp", "--preset", "mixed-frontier"] }
+  }
+}
+```
+
+Tools: **`route_prompt`** (pick the optimal tier + model + cost for a prompt),
+**`estimate_cost`** (per-tier cost of a prompt), **`list_tiers`** (configured models).
 
 ---
 
@@ -181,6 +244,7 @@ uv run streamlit run examples/playground.py
 | `CLASSIFIER` | Calculates probability score using token weights to route to cheap/expensive models. | `classifier_weights`, `classifier_intercept`, `classifier_threshold` |
 | `KNN` | k-nearest-neighbour voting over labelled examples in local TF-IDF space; supports online learning. | `knn_examples`, `knn_k` |
 | `ENSEMBLE` | Weighted vote across complexity, classifier, and semantic signals. | `ensemble_weights` |
+| `ROLE` | Route by the agent role in `metadata['role']` (planner, tool_select, …). | `role_routes` |
 | `COMPLEXITY` | Evaluates prompt complexity (length, syntax structure, code blocks) to route simple tasks to cheap tiers. | `complexity_threshold` |
 | `COST_AWARE` | Maximizes performance under a set budget, downgrading tiers as consumption approaches limit. | `cost_budget_usd` |
 | `LATENCY` | Filters tiers meeting a latency target, routing to the most capable tier within target. | `latency_target_ms` |

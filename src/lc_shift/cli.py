@@ -99,6 +99,20 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    # stdout is the JSON-RPC channel here, so never print to it.
+    from lc_shift.mcp import serve_stdio
+
+    router = _build_router(args)
+    print(
+        f"lc-shift MCP server on stdio | strategy={router.config.strategy.value} "
+        f"| tiers={list(router.config.tiers)}",
+        file=sys.stderr,
+    )
+    serve_stdio(router)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lc-shift", description="Local, zero-dependency LLM router.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -144,6 +158,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")
     p_serve.add_argument("--port", type=int, default=8000, help="bind port (default 8000)")
     p_serve.set_defaults(func=_cmd_serve)
+
+    p_mcp = sub.add_parser(
+        "mcp",
+        parents=[common],
+        help="run a Model Context Protocol (MCP) server over stdio",
+    )
+    p_mcp.set_defaults(func=_cmd_mcp)
 
     return parser
 
