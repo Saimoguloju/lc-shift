@@ -15,6 +15,7 @@ By running entirely locally without network queries or heavy ML frameworks (like
 
 ## Key Features
 
+*   🔌 **Drop-in OpenAI-Compatible Proxy**: Point any OpenAI SDK at lc-shift and it transparently routes each request to the optimal model tier — **no code changes**. Pure standard library (`http.server` + `urllib`), so the proxy keeps the zero-dependency promise.
 *   🎯 **Intent-based Semantic Routing**: Matches prompt intent against predefined examples using an on-device TF-IDF & Cosine Similarity engine.
 *   🧠 **RouteLLM-style Classifier**: Uses a local linear model/logistic regression classifier to compute the probability that a prompt requires a frontier model.
 *   🤝 **kNN Router with Online Learning**: Non-parametric k-nearest-neighbour routing that adapts at runtime via `router.learn()`. Recent research ([*"When Simple kNN Beats Complex Learned Routers"*, arXiv:2505.12601](https://arxiv.org/pdf/2505.12601)) shows this approach rivals heavyweight learned routers.
@@ -38,7 +39,51 @@ pip install lc-shift
 
 ---
 
-## Quick Start
+## Drop-in OpenAI-Compatible Proxy
+
+The fastest way to use lc-shift: run it as a proxy and point your **existing** OpenAI
+code at it. Every request is routed locally (sub-1ms) to the best tier, the `model`
+field is rewritten, and the call is forwarded to your backend (OpenAI, Ollama, vLLM,
+LiteLLM, OpenRouter, …). No application code changes.
+
+```bash
+# Route in front of Ollama (local), using the complexity strategy
+lc-shift serve --backend http://localhost:11434/v1 --preset cost-optimized --strategy complexity
+
+# …or in front of OpenAI
+lc-shift serve --backend https://api.openai.com/v1 --api-key $OPENAI_API_KEY --preset openai-3tier
+```
+
+```python
+from openai import OpenAI
+
+# The ONLY change: base_url points at lc-shift instead of the provider.
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="sk-...")
+
+resp = client.chat.completions.create(
+    model="auto",                                  # lc-shift overrides this per-prompt
+    messages=[{"role": "user", "content": "What is 2 + 2?"}],   # -> cheap tier
+)
+print(resp.model)  # the model lc-shift actually routed to
+```
+
+Every response includes `x-lc-shift-tier` and `x-lc-shift-model` headers so you can see
+the decision. Endpoints: `POST /v1/chat/completions`, `GET /v1/models`, `GET /health`.
+
+> Use `--config path/to/config.json` instead of `--preset/--strategy` to drive the proxy
+> with the `knn`, `semantic`, `classifier`, or `ensemble` strategies.
+
+### Run with Docker
+
+```bash
+docker build -t lc-shift .
+docker run -p 8000:8000 lc-shift \
+  serve --backend http://host.docker.internal:11434/v1 --host 0.0.0.0
+```
+
+---
+
+## Quick Start (Library)
 
 ### 1. Intent-Based Semantic Routing
 Route prompts to specialized tiers based on the semantic intent matching of your reference utterances:

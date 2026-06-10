@@ -11,6 +11,7 @@ from lc_shift.health import TierHealth
 from lc_shift.hooks import HookRegistry
 from lc_shift.models import CostSnapshot, FallbackChain, RoutingDecision, ShiftRequest, TierMetrics
 from lc_shift.router import RouterShifter
+from lc_shift.server import BackendConfig, create_server, serve
 from lc_shift import providers
 from lc_shift.strategies import (
     ClassifierStrategy,
@@ -78,6 +79,10 @@ __all__ = [
     "load_dataset",
     "BenchmarkResult",
     "EvalRecord",
+    # OpenAI-compatible proxy
+    "serve",
+    "create_server",
+    "BackendConfig",
     # Providers module
 
     "providers",
@@ -110,4 +115,4 @@ __all__ = [
     "SGLANG",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

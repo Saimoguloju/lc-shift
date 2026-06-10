@@ -90,6 +90,15 @@ def _cmd_bench(args: argparse.Namespace) -> int:
     return asyncio.run(_run())
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from lc_shift.server import BackendConfig, serve
+
+    router = _build_router(args)
+    backend = BackendConfig(base_url=args.backend, api_key=args.api_key)
+    serve(router, backend, host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lc-shift", description="Local, zero-dependency LLM router.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -119,6 +128,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_bench = sub.add_parser("bench", parents=[common], help="benchmark a strategy over a JSONL dataset")
     p_bench.add_argument("dataset", help="path to a JSONL file of {prompt, ideal_tier} records")
     p_bench.set_defaults(func=_cmd_bench)
+
+    p_serve = sub.add_parser(
+        "serve",
+        parents=[common],
+        help="run a drop-in OpenAI-compatible routing proxy",
+    )
+    p_serve.add_argument(
+        "--backend",
+        required=True,
+        help="OpenAI-compatible backend base URL to forward to, "
+        "e.g. http://localhost:11434/v1 (Ollama) or https://api.openai.com/v1",
+    )
+    p_serve.add_argument("--api-key", default=None, help="API key forwarded to the backend")
+    p_serve.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")
+    p_serve.add_argument("--port", type=int, default=8000, help="bind port (default 8000)")
+    p_serve.set_defaults(func=_cmd_serve)
 
     return parser
 
