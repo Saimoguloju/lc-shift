@@ -61,7 +61,7 @@ class TestTools:
         resp = server.handle_message(_req("tools/list"))
         assert resp is not None
         names = {t["name"] for t in resp["result"]["tools"]}
-        assert names == {"route_prompt", "estimate_cost", "list_tiers"}
+        assert names == {"route_prompt", "estimate_cost", "list_tiers", "redact_pii"}
         for tool in resp["result"]["tools"]:
             assert "inputSchema" in tool and tool["inputSchema"]["type"] == "object"
 

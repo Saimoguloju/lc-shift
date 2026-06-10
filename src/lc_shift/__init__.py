@@ -8,6 +8,7 @@ from lc_shift.exceptions import (
 )
 from lc_shift.agent import AgentRouter, EscalationAttempt, EscalationResult
 from lc_shift.eval import BenchmarkResult, EvalRecord, evaluate, load_dataset
+from lc_shift.guardrails import PIIFinding, PIIRedactor, PIIType, RedactionResult
 from lc_shift.health import TierHealth
 from lc_shift.mcp import MCPServer, serve_stdio
 from lc_shift.hooks import HookRegistry
@@ -94,6 +95,11 @@ __all__ = [
     # MCP server
     "MCPServer",
     "serve_stdio",
+    # PII guardrails
+    "PIIRedactor",
+    "RedactionResult",
+    "PIIFinding",
+    "PIIType",
     # Providers module
 
     "providers",
@@ -126,4 +132,4 @@ __all__ = [
     "SGLANG",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

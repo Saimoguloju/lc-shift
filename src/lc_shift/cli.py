@@ -91,11 +91,13 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
+    from lc_shift.guardrails import PIIRedactor
     from lc_shift.server import BackendConfig, serve
 
     router = _build_router(args)
     backend = BackendConfig(base_url=args.backend, api_key=args.api_key)
-    serve(router, backend, host=args.host, port=args.port)
+    redactor = PIIRedactor() if args.redact_pii else None
+    serve(router, backend, host=args.host, port=args.port, redactor=redactor, pii_mode=args.pii_mode)
     return 0
 
 
@@ -157,6 +159,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--api-key", default=None, help="API key forwarded to the backend")
     p_serve.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")
     p_serve.add_argument("--port", type=int, default=8000, help="bind port (default 8000)")
+    p_serve.add_argument(
+        "--redact-pii",
+        action="store_true",
+        help="scrub PII (emails, phones, SSNs, cards, keys) from requests before forwarding",
+    )
+    p_serve.add_argument(
+        "--pii-mode",
+        default="redact",
+        choices=["redact", "reject"],
+        help="redact PII in place (default) or reject requests containing PII with HTTP 400",
+    )
     p_serve.set_defaults(func=_cmd_serve)
 
     p_mcp = sub.add_parser(

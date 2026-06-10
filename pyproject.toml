@@ -1,7 +1,7 @@
 [project]
 name = "lc-shift"
-version = "0.4.0"
-description = "Provider-agnostic LLM router for the agentic era — drop-in OpenAI-compatible proxy, native MCP server, and agent-loop escalation routing. Routes each prompt to the optimal model tier via complexity, kNN, classifier, semantic, ensemble, role, budget, or latency. Sub-1ms, zero dependencies, built-in cost-quality benchmarking, CLI, 35 providers."
+version = "0.5.0"
+description = "Provider-agnostic LLM router for the agentic era — drop-in OpenAI-compatible proxy with PII guardrails, native MCP server, and agent-loop escalation routing. Routes each prompt to the optimal model tier via complexity, kNN, classifier, semantic, ensemble, role, budget, or latency. Sub-1ms, zero dependencies, built-in cost-quality benchmarking, CLI, 35 providers."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -11,6 +11,7 @@ keywords = [
     "llm-router", "llm-gateway", "model-routing", "cost-optimization",
     "fallback", "multi-provider", "orchestration",
     "mcp", "model-context-protocol", "agents", "agentic", "ai-agents",
+    "pii", "pii-redaction", "guardrails", "data-privacy",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

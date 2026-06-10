@@ -16,7 +16,8 @@ By running entirely locally without network queries or heavy ML frameworks (like
 ## Key Features
 
 *   🔌 **Drop-in OpenAI-Compatible Proxy**: Point any OpenAI SDK at lc-shift and it transparently routes each request to the optimal model tier — **no code changes**. Pure standard library (`http.server` + `urllib`), so the proxy keeps the zero-dependency promise.
-*   🧩 **Native MCP Server**: Exposes routing as Model Context Protocol tools (`route_prompt`, `estimate_cost`, `list_tiers`) for Claude Desktop, Cursor, and agent runtimes — a from-scratch, spec-compliant (`2025-06-18`) JSON-RPC/stdio server with **zero dependencies**.
+*   🛡️ **PII Guardrails**: Detect & redact emails, phones, SSNs, credit cards (Luhn-checked), IPs, and API keys **before** a prompt leaves your network — `redact` in place or `reject` the request. Pure-regex, zero dependencies.
+*   🧩 **Native MCP Server**: Exposes routing as Model Context Protocol tools (`route_prompt`, `estimate_cost`, `list_tiers`, `redact_pii`) for Claude Desktop, Cursor, and agent runtimes — a from-scratch, spec-compliant (`2025-06-18`) JSON-RPC/stdio server with **zero dependencies**.
 *   🤖 **Agent-Loop Routing**: Route each agent step by role (`planner` → frontier, `tool_select` → cheap) and run **cheap-first escalation** that climbs to a stronger model only when a validation check fails.
 *   🎯 **Intent-based Semantic Routing**: Matches prompt intent against predefined examples using an on-device TF-IDF & Cosine Similarity engine.
 *   🧠 **RouteLLM-style Classifier**: Uses a local linear model/logistic regression classifier to compute the probability that a prompt requires a frontier model.
@@ -74,6 +75,31 @@ the decision. Endpoints: `POST /v1/chat/completions`, `GET /v1/models`, `GET /he
 
 > Use `--config path/to/config.json` instead of `--preset/--strategy` to drive the proxy
 > with the `knn`, `semantic`, `classifier`, or `ensemble` strategies.
+
+#### PII Guardrails
+
+Scrub sensitive data from every request before it is routed or forwarded — so
+emails, SSNs, credit cards, and API keys never reach an external provider:
+
+```bash
+# Redact PII in place (default), then forward
+lc-shift serve --backend https://api.openai.com/v1 --redact-pii
+
+# …or reject any request that contains PII with HTTP 400
+lc-shift serve --backend https://api.openai.com/v1 --redact-pii --pii-mode reject
+```
+
+Redacted responses carry an `x-lc-shift-pii-redacted` header with per-type counts.
+Use it as a library too:
+
+```python
+from lc_shift import PIIRedactor
+
+r = PIIRedactor()                                  # or PIIRedactor(types={PIIType.EMAIL})
+out = r.redact("email jane@acme.com, card 4111111111111111")
+print(out.text)    # 'email [REDACTED_EMAIL], card [REDACTED_CREDIT_CARD]'
+print(out.counts)  # {'email': 1, 'credit_card': 1}
+```
 
 ### Run with Docker
 

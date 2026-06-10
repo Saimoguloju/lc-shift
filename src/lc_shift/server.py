@@ -21,14 +21,59 @@ import json
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from lc_shift.guardrails import PIIRedactor
 from lc_shift.models import RoutingDecision, ShiftRequest
 from lc_shift.router import RouterShifter
 
 _CHAT_PATH = "/chat/completions"
+PIIMode = Literal["redact", "reject"]
+
+
+def redact_messages(payload: dict[str, Any], redactor: PIIRedactor) -> tuple[dict[str, Any], dict[str, int]]:
+    """Redact PII from every message ``content`` in a chat request body.
+
+    Returns a copy of the payload with redacted text and the aggregate counts of
+    PII found per type. Handles both string and multimodal (list) ``content``.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return payload, {}
+
+    counts: dict[str, int] = {}
+    new_messages: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            new_messages.append(message)
+            continue
+        content = message.get("content")
+        new_message = dict(message)
+        if isinstance(content, str):
+            result = redactor.redact(content)
+            new_message["content"] = result.text
+            for key, value in result.counts.items():
+                counts[key] = counts.get(key, 0) + value
+        elif isinstance(content, list):
+            parts: list[Any] = []
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    result = redactor.redact(part["text"])
+                    new_part = dict(part)
+                    new_part["text"] = result.text
+                    parts.append(new_part)
+                    for key, value in result.counts.items():
+                        counts[key] = counts.get(key, 0) + value
+                else:
+                    parts.append(part)
+            new_message["content"] = parts
+        new_messages.append(new_message)
+
+    new_payload = dict(payload)
+    new_payload["messages"] = new_messages
+    return new_payload, counts
 
 
 class BackendConfig(BaseModel):
@@ -95,10 +140,14 @@ class _RouterHTTPServer(ThreadingHTTPServer):
         handler: type[BaseHTTPRequestHandler],
         router: RouterShifter,
         backend: BackendConfig,
+        redactor: PIIRedactor | None = None,
+        pii_mode: PIIMode = "redact",
     ) -> None:
         super().__init__(address, handler)
         self.router = router
         self.backend = backend
+        self.redactor = redactor
+        self.pii_mode = pii_mode
 
 
 class _ProxyHandler(BaseHTTPRequestHandler):
@@ -152,6 +201,18 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": {"message": "invalid JSON body", "type": "invalid_request_error"}})
             return
 
+        # Guardrail: scrub PII before the prompt is routed or forwarded.
+        pii_counts: dict[str, int] = {}
+        if self.server.redactor is not None:
+            payload, pii_counts = redact_messages(payload, self.server.redactor)
+            if pii_counts and self.server.pii_mode == "reject":
+                self._send_json(
+                    400,
+                    {"error": {"message": "request blocked: PII detected", "type": "pii_blocked"}},
+                    extra={"x-lc-shift-pii": json.dumps(pii_counts)},
+                )
+                return
+
         try:
             decision = asyncio.run(select_decision(self.server.router, payload))
         except ValueError as exc:
@@ -162,10 +223,15 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
 
         rewritten = rewrite_payload(payload, decision)
-        self._forward(rewritten, decision)
+        self._forward(rewritten, decision, pii_counts)
 
     # -- upstream forwarding ---------------------------------------------
-    def _forward(self, payload: dict[str, Any], decision: RoutingDecision) -> None:
+    def _forward(
+        self,
+        payload: dict[str, Any],
+        decision: RoutingDecision,
+        pii_counts: dict[str, int] | None = None,
+    ) -> None:
         backend = self.server.backend
         headers = {"Content-Type": "application/json"}
         auth = self.headers.get("Authorization")
@@ -185,6 +251,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             "x-lc-shift-model": decision.tier.model_id,
             "x-lc-shift-overhead-ms": f"{decision.overhead_ms:.4f}",
         }
+        if pii_counts:
+            lc_headers["x-lc-shift-pii-redacted"] = json.dumps(pii_counts)
 
         try:
             with urllib.request.urlopen(request, timeout=backend.timeout) as resp:
@@ -219,9 +287,11 @@ def create_server(
     *,
     host: str = "127.0.0.1",
     port: int = 8000,
+    redactor: PIIRedactor | None = None,
+    pii_mode: PIIMode = "redact",
 ) -> _RouterHTTPServer:
     """Create (but do not start) the proxy HTTP server."""
-    return _RouterHTTPServer((host, port), _ProxyHandler, router, backend)
+    return _RouterHTTPServer((host, port), _ProxyHandler, router, backend, redactor, pii_mode)
 
 
 def serve(
@@ -230,9 +300,15 @@ def serve(
     *,
     host: str = "127.0.0.1",
     port: int = 8000,
+    redactor: PIIRedactor | None = None,
+    pii_mode: PIIMode = "redact",
 ) -> None:
     """Start the proxy and serve forever (blocking)."""
-    httpd = create_server(router, backend, host=host, port=port)
+    httpd = create_server(
+        router, backend, host=host, port=port, redactor=redactor, pii_mode=pii_mode
+    )
+    if redactor is not None:
+        print(f"lc-shift PII guardrail: ON (mode={pii_mode})")
     print(f"lc-shift proxy on http://{host}:{port}  ->  {backend.base_url}")
     print(f"  strategy: {router.config.strategy.value} | tiers: {list(router.config.tiers)}")
     try:

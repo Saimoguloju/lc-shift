@@ -21,6 +21,7 @@ import json
 import sys
 from typing import IO, Any
 
+from lc_shift.guardrails import PIIRedactor
 from lc_shift.models import ShiftRequest
 from lc_shift.router import RouterShifter
 from lc_shift.strategies import estimate_token_count
@@ -34,12 +35,13 @@ _INVALID_PARAMS = -32602
 class MCPServer:
     """A minimal, spec-compliant MCP server over newline-delimited JSON-RPC."""
 
-    __slots__ = ("_router", "_name", "_version")
+    __slots__ = ("_router", "_name", "_version", "_redactor")
 
-    def __init__(self, router: RouterShifter, *, name: str = "lc-shift", version: str = "0.4.0") -> None:
+    def __init__(self, router: RouterShifter, *, name: str = "lc-shift", version: str = "0.5.0") -> None:
         self._router = router
         self._name = name
         self._version = version
+        self._redactor = PIIRedactor()
 
     # -- transport --------------------------------------------------------
     def serve(self, stdin: IO[str] | None = None, stdout: IO[str] | None = None) -> None:
@@ -135,6 +137,19 @@ class MCPServer:
                 "description": "Return the configured tiers with provider, model id, and pricing.",
                 "inputSchema": {"type": "object", "properties": {}},
             },
+            {
+                "name": "redact_pii",
+                "title": "Redact PII from text",
+                "description": (
+                    "Detect and mask PII (emails, phones, SSNs, credit cards, IPs, API keys) "
+                    "in text before it is sent to a model. Returns the redacted text and counts."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string", "description": "Text to redact"}},
+                    "required": ["text"],
+                },
+            },
         ]
 
     def _tools_call(self, msg_id: Any, params: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +162,8 @@ class MCPServer:
                 text, structured = self._tool_estimate_cost(args)
             elif name == "list_tiers":
                 text, structured = self._tool_list_tiers()
+            elif name == "redact_pii":
+                text, structured = self._tool_redact_pii(args)
             else:
                 return self._error(msg_id, _INVALID_PARAMS, f"unknown tool: {name}")
         except ValueError as exc:
@@ -230,6 +247,18 @@ class MCPServer:
         lines = [f"{len(tiers)} tiers (strategy: {self._router.config.strategy.value}):"]
         lines += [f"  {name:<14} {t.provider}/{t.model_id}" for name, t in tiers.items()]
         return "\n".join(lines), structured
+
+    def _tool_redact_pii(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        text = args.get("text")
+        if not isinstance(text, str):
+            raise ValueError("'text' is required and must be a string")
+        result = self._redactor.redact(text)
+        structured = {
+            "redacted_text": result.text,
+            "counts": result.counts,
+            "has_pii": result.has_pii,
+        }
+        return result.text, structured
 
     # -- JSON-RPC envelopes ----------------------------------------------
     @staticmethod
