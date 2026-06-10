@@ -100,25 +100,23 @@ class RouterShifter:
         skipped: list[str] = []
         decisions: list[RoutingDecision] = []
 
-        for _ in range(len(self._config.tiers)):
-            t0 = time.perf_counter_ns()
-            tier_name, reason = await self._strategy.decide(
-                request, self._config, self._spent_usd
-            )
-            overhead_ms = (time.perf_counter_ns() - t0) / 1_000_000
+        t0 = time.perf_counter_ns()
+        tier_name, reason = await self._strategy.decide(
+            request, self._config, self._spent_usd
+        )
+        overhead_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
-            if self._health.is_healthy(tier_name):
-                decisions.append(
-                    RoutingDecision(
-                        tier_name=tier_name,
-                        tier=self._config.tiers[tier_name],
-                        reason=reason,
-                        overhead_ms=overhead_ms,
-                    )
+        if self._health.is_healthy(tier_name):
+            decisions.append(
+                RoutingDecision(
+                    tier_name=tier_name,
+                    tier=self._config.tiers[tier_name],
+                    reason=reason,
+                    overhead_ms=overhead_ms,
                 )
-                break
-            if tier_name not in skipped:
-                skipped.append(tier_name)
+            )
+        else:
+            skipped.append(tier_name)
 
         seen = {d.tier_name for d in decisions} | set(skipped)
         remaining = sorted(
@@ -180,9 +178,7 @@ class RouterShifter:
         m.output_tokens += output_tokens
 
         if self._hooks:
-            asyncio.get_event_loop().create_task(
-                self._hooks.fire_usage(tier_name, input_tokens, output_tokens)
-            )
+            self._hooks.dispatch_usage(tier_name, input_tokens, output_tokens)
 
     def snapshot(self) -> CostSnapshot:
         """Returns a metrics snapshot of the current router state."""
@@ -215,6 +211,22 @@ class RouterShifter:
     @property
     def config(self) -> RouterConfig:
         return self._config
+
+    @property
+    def spent_usd(self) -> float:
+        """Total estimated spend recorded so far, in USD."""
+        return self._spent_usd
+
+    def seed_spend(self, amount_usd: float) -> None:
+        """Set the cumulative spend directly.
+
+        Useful for restoring router state across stateless invocations (e.g. a
+        web UI that recreates the router each rerun). Cost-aware routing and
+        budget guards read this value.
+        """
+        if amount_usd < 0:
+            raise RoutingError(f"seed_spend amount must be >= 0, got {amount_usd}")
+        self._spent_usd = amount_usd
 
     @property
     def health(self) -> TierHealth:

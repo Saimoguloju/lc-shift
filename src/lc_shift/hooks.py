@@ -46,6 +46,28 @@ class HookRegistry:
             if asyncio.iscoroutine(result):
                 await result
 
+    @staticmethod
+    def _dispatch(fns: list[Callable[..., Any]], *args: Any) -> None:
+        """Fire hooks from a synchronous context.
+
+        Sync callbacks run inline. Async callbacks are scheduled on the running
+        loop if one exists; otherwise they are executed to completion. This keeps
+        ``record_usage`` usable from both sync and async call sites without
+        relying on the deprecated ``get_event_loop()``.
+        """
+        try:
+            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        for fn in fns:
+            result = fn(*args)
+            if asyncio.iscoroutine(result):
+                if loop is not None:
+                    loop.create_task(result)
+                else:
+                    asyncio.run(result)
+
     async def fire_route(self, request: ShiftRequest, decision: RoutingDecision) -> None:
         await self._fire(self._on_route, request, decision)
 
@@ -54,6 +76,10 @@ class HookRegistry:
 
     async def fire_usage(self, tier_name: str, input_tokens: int, output_tokens: int) -> None:
         await self._fire(self._on_usage, tier_name, input_tokens, output_tokens)
+
+    def dispatch_usage(self, tier_name: str, input_tokens: int, output_tokens: int) -> None:
+        """Synchronous entry point for usage hooks (see :meth:`_dispatch`)."""
+        self._dispatch(self._on_usage, tier_name, input_tokens, output_tokens)
 
     async def fire_fallback(
         self, failed_tier: str, next_tier: str, exc: Exception

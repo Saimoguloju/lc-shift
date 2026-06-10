@@ -163,16 +163,10 @@ router_config = RouterConfig(
     classifier_threshold=classifier_threshold
 )
 
-# Instantiate RouterShifter
-@st.cache_resource
-def get_router(config_json: str) -> RouterShifter:
-    # Quick caching of router instance
-    return RouterShifter(router_config)
-
-# Ensure config mutations recreate router
+# Instantiate RouterShifter. The router is recreated on every rerun so config
+# changes always take effect; cumulative spend is restored from session state.
 router = RouterShifter(router_config)
-# Force set cumulative spent in router state
-router._spent_usd = st.session_state.spent_usd
+router.seed_spend(st.session_state.spent_usd)
 
 # Layout: Two Columns
 col1, col2 = st.columns([3, 2])
@@ -248,7 +242,7 @@ if run_btn and user_prompt:
     
     # Record simulated usage
     router.record_usage(decision.tier_name, input_tokens=sim_token_in, output_tokens=sim_token_out)
-    st.session_state.spent_usd = router._spent_usd
+    st.session_state.spent_usd = router.spent_usd
     st.session_state.requests_count += 1
     
     # Save History
